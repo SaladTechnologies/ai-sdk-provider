@@ -1,15 +1,18 @@
+import { convertUint8ArrayToBase64 } from '@ai-sdk/provider-utils'
 import type {
   LanguageModelV4Prompt,
   LanguageModelV4TextPart,
   LanguageModelV4FilePart,
-  LanguageModelV4ReasoningPart,
-  LanguageModelV4ToolCallPart,
   LanguageModelV4ToolResultPart,
+  LanguageModelV4ToolResultOutput,
 } from '@ai-sdk/provider'
+
+type OpenAIContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
+type ToolResultContentPart = Extract<LanguageModelV4ToolResultOutput, { type: 'content' }>['value'][number]
 
 export type OpenAIMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }> | null
+  content: string | Array<OpenAIContentPart> | null
   tool_calls?: Array<{
     id: string
     type: 'function'
@@ -42,124 +45,128 @@ export function convertToProviderMessages(prompt: LanguageModelV4Prompt): Array<
       }
 
       case 'user': {
-        const textParts = message.content?.filter(
-          (part): part is LanguageModelV4TextPart => part.type === 'text' && part.text != null,
-        )
-
-        const fileParts = message.content?.filter((part): part is LanguageModelV4FilePart => part.type === 'file')
-
-        if (textParts != null && textParts.length > 0 && fileParts != null && fileParts.length === 0) {
-          messages.push({
-            role: 'user',
-            content: textParts[0]?.text ?? '',
-          })
-        } else if (textParts != null && textParts.length > 0 && fileParts != null && fileParts.length > 0) {
-          const contentArray: Array<{
-            type: 'text' | 'image_url'
-            text?: string
-            image_url?: { url: string }
-          }> = [{ type: 'text', text: textParts[0]?.text ?? '' }]
-
-          for (const filePart of fileParts) {
-            contentArray.push({
-              type: 'image_url',
-              image_url: {
-                url: `data:${filePart.mediaType || 'image/png'};base64,data${filePart.data}`,
-              },
-            })
-          }
-
-          messages.push({
-            role: 'user',
-            content: contentArray,
-          })
-        } else if (fileParts != null && fileParts.length > 0) {
-          const contentArray: Array<{
-            type: 'text' | 'image_url'
-            text?: string
-            image_url?: { url: string }
-          }> = []
-
-          for (const filePart of fileParts) {
-            contentArray.push({
-              type: 'image_url',
-              image_url: {
-                url: `data:${filePart.mediaType || 'image/png'};base64,data${filePart.data}`,
-              },
-            })
-          }
-
-          messages.push({
-            role: 'user',
-            content: contentArray,
-          })
+        const content = message.content.flatMap(convertUserContentPart)
+        if (content.length === 0) {
+          break
         }
+
+        const textOnly = content.every((part) => part.type === 'text')
+        messages.push({
+          role: 'user',
+          content: textOnly ? content.map((part) => part.text).join('') : content,
+        })
         break
       }
 
       case 'assistant': {
-        const assistantTextParts = message.content?.filter(
-          (part): part is LanguageModelV4TextPart => part.type === 'text' && part.text != null,
-        )
+        const text: string[] = []
+        const toolCalls: Array<OpenAIToolCall> = []
 
-        const toolCallParts = message.content?.filter(
-          (part): part is LanguageModelV4ToolCallPart => part.type === 'tool-call',
-        )
-
-        if (assistantTextParts != null && assistantTextParts.length > 0) {
-          messages.push({
-            role: 'assistant',
-            content: assistantTextParts[0]?.text ?? '',
-          })
+        for (const part of message.content) {
+          if (part.type === 'text' || part.type === 'reasoning') {
+            text.push(part.text)
+          } else if (part.type === 'tool-call') {
+            toolCalls.push({
+              id: part.toolCallId,
+              type: 'function',
+              function: {
+                name: part.toolName,
+                arguments: typeof part.input === 'string' ? part.input : JSON.stringify(part.input),
+              },
+            })
+          }
         }
 
-        if (toolCallParts != null && toolCallParts.length > 0) {
-          const toolCalls: Array<OpenAIToolCall> = toolCallParts.map((part) => ({
-            id: part.toolCallId,
-            type: 'function',
-            function: {
-              name: part.toolName,
-              arguments: JSON.stringify(part.input),
-            },
-          }))
-
+        if (text.length > 0 || toolCalls.length > 0) {
           messages.push({
             role: 'assistant',
-            content: null,
-            tool_calls: toolCalls,
-          })
-        }
-
-        const reasoningPart = message.content?.find(
-          (part): part is LanguageModelV4ReasoningPart => part.type === 'reasoning',
-        )
-
-        if (reasoningPart != null) {
-          messages.push({
-            role: 'assistant',
-            content: reasoningPart.text,
+            content: text.length > 0 ? text.join('') : null,
+            tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
           })
         }
         break
       }
 
       case 'tool': {
-        const toolResult = message.content?.find(
-          (part): part is LanguageModelV4ToolResultPart => part.type === 'tool-result',
-        )
+        for (const part of message.content) {
+          if (part.type !== 'tool-result') {
+            continue
+          }
 
-        const toolCallId = toolResult?.toolCallId
-        const output = toolResult?.output
-
-        messages.push({
-          role: 'tool',
-          content: output?.type === 'text' ? output.value : '',
-          tool_call_id: toolCallId,
-        })
+          messages.push({
+            role: 'tool',
+            content: convertToolResultOutput(part),
+            tool_call_id: part.toolCallId,
+          })
+        }
         break
       }
     }
   }
 
   return messages
+}
+
+function convertUserContentPart(part: LanguageModelV4TextPart | LanguageModelV4FilePart): OpenAIContentPart[] {
+  if (part.type === 'text') {
+    return [{ type: 'text', text: part.text }]
+  }
+
+  if (part.data.type === 'text') {
+    return [{ type: 'text', text: part.data.text }]
+  }
+
+  if (!part.mediaType.startsWith('image/')) {
+    return []
+  }
+
+  if (part.data.type === 'url') {
+    return [{ type: 'image_url', image_url: { url: part.data.url.toString() } }]
+  }
+
+  if (part.data.type === 'data') {
+    return [
+      {
+        type: 'image_url',
+        image_url: {
+          url: `data:${part.mediaType};base64,${convertFileDataToBase64(part.data.data)}`,
+        },
+      },
+    ]
+  }
+
+  return []
+}
+
+function convertFileDataToBase64(data: Uint8Array | string): string {
+  return typeof data === 'string' ? data : convertUint8ArrayToBase64(data)
+}
+
+function convertToolResultOutput(part: LanguageModelV4ToolResultPart): string {
+  switch (part.output.type) {
+    case 'text':
+    case 'error-text':
+      return part.output.value
+    case 'json':
+    case 'error-json':
+      return JSON.stringify(part.output.value)
+    case 'execution-denied':
+      return part.output.reason ?? 'Execution denied'
+    case 'content':
+      return part.output.value.map(convertToolResultContentPart).join('')
+  }
+}
+
+function convertToolResultContentPart(part: ToolResultContentPart): string {
+  switch (part.type) {
+    case 'text':
+      return part.text
+    case 'file-data':
+      return `data:${part.mediaType};base64,${part.data}`
+    case 'file-url':
+      return part.url
+    case 'file-reference':
+    case 'custom':
+      return ''
+  }
 }

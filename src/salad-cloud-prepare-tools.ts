@@ -16,9 +16,9 @@ export interface PrepareToolsResult {
 }
 
 export type OpenAIToolChoice =
-  | { type: 'auto' }
-  | { type: 'none' }
-  | { type: 'required' }
+  | 'auto'
+  | 'none'
+  | 'required'
   | { type: 'function'; function: { name: string } }
 
 export function prepareTools(
@@ -47,7 +47,7 @@ export function prepareTools(
   if (toolChoice == null) {
     tool_choice = undefined
   } else if (toolChoice.type === 'auto' || toolChoice.type === 'none' || toolChoice.type === 'required') {
-    tool_choice = undefined
+    tool_choice = toolChoice.type
   } else if (toolChoice.type === 'tool' && toolChoice.toolName) {
     tool_choice = { type: 'function', function: { name: toolChoice.toolName } }
   } else {

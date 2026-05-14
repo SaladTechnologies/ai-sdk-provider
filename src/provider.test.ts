@@ -157,13 +157,35 @@ describe('createSaladCloud', () => {
     cleanEnv()
     const { createSaladCloud } = await import('./provider.js')
     const provider = createSaladCloud({
+      apiKey: 'test-key',
       headers: { 'X-Custom-Header': 'custom-value' },
     })
     const model = provider('qwen3.6-35b-a3b')
     const headersFn = model.config.headers as () => Record<string, string | undefined>
     const headers = headersFn()
-    expect(headers['Authorization']).toContain('Bearer ')
+    expect(headers['Authorization']).toBe('Bearer test-key')
     expect(headers['X-Custom-Header']).toBe('custom-value')
+  })
+
+  test('headers function loads apiKey from environment variable', async () => {
+    process.env.SALAD_CLOUD_API_KEY = 'env-key'
+    const { createSaladCloud } = await import('./provider.js')
+    const provider = createSaladCloud()
+    const model = provider('qwen3.6-35b-a3b')
+    const headersFn = model.config.headers as () => Record<string, string | undefined>
+    const headers = headersFn()
+    expect(headers['Authorization']).toBe('Bearer env-key')
+  })
+
+  test('headers function throws a provider-utils error when apiKey is missing', async () => {
+    cleanEnv()
+    const { createSaladCloud } = await import('./provider.js')
+    const provider = createSaladCloud()
+    const model = provider('qwen3.6-35b-a3b')
+    const headersFn = model.config.headers as () => Record<string, string | undefined>
+    expect(() => headersFn()).toThrow(
+      'SaladCloud API key is missing. Pass it using the \'apiKey\' parameter or the SALAD_CLOUD_API_KEY environment variable.',
+    )
   })
 
   test('headers function returns Authorization and Content-Type', async () => {

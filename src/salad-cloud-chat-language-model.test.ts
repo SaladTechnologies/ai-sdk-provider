@@ -1,24 +1,26 @@
 import { describe, expect, test } from 'vitest'
-import {
-  convertToProviderMessages,
-  type LanguageModelV4Prompt,
-  type LanguageModelV4TextPart,
-  type LanguageModelV4FilePart,
-  type LanguageModelV4ToolCallPart,
-  type LanguageModelV4ToolResultPart,
-  type LanguageModelV4ReasoningPart,
-} from './salad-cloud-convert-chat-messages'
+import { createSaladCloud } from './provider'
+import { convertToProviderMessages } from './salad-cloud-convert-chat-messages'
 import { convertUsage } from './salad-cloud-convert-usage'
 import { mapSaladCloudError } from './salad-cloud-error'
 import { mapFinishReason } from './salad-cloud-map-finish-reason'
-import { prepareTools, type OpenAIToolChoice } from './salad-cloud-prepare-tools'
+import { prepareTools } from './salad-cloud-prepare-tools'
 import { getResponseMetadata } from './salad-cloud-response-metadata'
+import type {
+  LanguageModelV4FilePart,
+  LanguageModelV4Prompt,
+  LanguageModelV4ReasoningPart,
+  LanguageModelV4StreamPart,
+  LanguageModelV4TextPart,
+  LanguageModelV4ToolCallPart,
+  LanguageModelV4ToolResultPart,
+} from '@ai-sdk/provider'
 
 function makeTextPart(text: string): LanguageModelV4TextPart {
   return { type: 'text', text }
 }
 
-function makeFilePart(mediaType: string, data: string | Uint8Array): LanguageModelV4FilePart {
+function makeFilePart(mediaType: string, data: LanguageModelV4FilePart['data']): LanguageModelV4FilePart {
   return { type: 'file', mediaType, data }
 }
 
@@ -252,7 +254,7 @@ describe('convertToProviderMessages', () => {
     })
   })
 
-  test('converts user message with multiple text parts (takes first)', () => {
+  test('converts user message with multiple text parts', () => {
     const prompt: LanguageModelV4Prompt = [
       {
         role: 'user',
@@ -263,7 +265,7 @@ describe('convertToProviderMessages', () => {
     expect(result).toHaveLength(1)
     expect(result[0]).toEqual({
       role: 'user',
-      content: 'First',
+      content: 'FirstSecond',
     })
   })
 
@@ -271,7 +273,7 @@ describe('convertToProviderMessages', () => {
     const prompt: LanguageModelV4Prompt = [
       {
         role: 'user',
-        content: [makeTextPart('What is this?'), makeFilePart('image/png', '_base64data')],
+        content: [makeTextPart('What is this?'), makeFilePart('image/png', { type: 'data', data: 'base64data' })],
       },
     ]
     const result = convertToProviderMessages(prompt)
@@ -282,7 +284,7 @@ describe('convertToProviderMessages', () => {
     expect(content[0]).toEqual({ type: 'text', text: 'What is this?' })
     expect(content[1]).toEqual({
       type: 'image_url',
-      image_url: { url: 'data:image/png;base64,data_base64data' },
+      image_url: { url: 'data:image/png;base64,base64data' },
     })
   })
 
@@ -290,7 +292,7 @@ describe('convertToProviderMessages', () => {
     const prompt: LanguageModelV4Prompt = [
       {
         role: 'user',
-        content: [makeFilePart('image/jpeg', '_binarydata')],
+        content: [makeFilePart('image/jpeg', { type: 'data', data: 'binarydata' })],
       },
     ]
     const result = convertToProviderMessages(prompt)
@@ -299,8 +301,26 @@ describe('convertToProviderMessages', () => {
     expect(content).toHaveLength(1)
     expect(content[0]).toEqual({
       type: 'image_url',
-      image_url: { url: 'data:image/jpeg;base64,data_binarydata' },
+      image_url: { url: 'data:image/jpeg;base64,binarydata' },
     })
+  })
+
+  test('converts user message with image URL', () => {
+    const prompt: LanguageModelV4Prompt = [
+      {
+        role: 'user',
+        content: [
+          makeTextPart('What is this?'),
+          makeFilePart('image/png', { type: 'url', url: new URL('https://example.com/image.png') }),
+        ],
+      },
+    ]
+    const result = convertToProviderMessages(prompt)
+    expect(result).toHaveLength(1)
+    expect(result[0]?.content).toEqual([
+      { type: 'text', text: 'What is this?' },
+      { type: 'image_url', image_url: { url: 'https://example.com/image.png' } },
+    ])
   })
 
   test('converts user message with no text and no files (empty)', () => {
@@ -352,15 +372,17 @@ describe('convertToProviderMessages', () => {
       },
     ]
     const result = convertToProviderMessages(prompt)
-    expect(result).toHaveLength(2)
+    expect(result).toHaveLength(1)
     expect(result[0]).toEqual({
       role: 'assistant',
       content: 'Let me search for that.',
-    })
-    expect(result[1]).toMatchObject({
-      role: 'assistant',
-      content: null,
-      tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'search' } }],
+      tool_calls: [
+        {
+          id: 'call-1',
+          type: 'function',
+          function: { name: 'search', arguments: JSON.stringify({ query: 'test' }) },
+        },
+      ],
     })
   })
 
@@ -387,14 +409,10 @@ describe('convertToProviderMessages', () => {
       },
     ]
     const result = convertToProviderMessages(prompt)
-    expect(result).toHaveLength(2)
+    expect(result).toHaveLength(1)
     expect(result[0]).toEqual({
       role: 'assistant',
-      content: 'Answer',
-    })
-    expect(result[1]).toEqual({
-      role: 'assistant',
-      content: 'Thinking...',
+      content: 'Thinking...Answer',
     })
   })
 
@@ -427,7 +445,7 @@ describe('convertToProviderMessages', () => {
     expect(result).toHaveLength(1)
     expect(result[0]).toEqual({
       role: 'tool',
-      content: '',
+      content: JSON.stringify({ temp: 72 }),
       tool_call_id: 'call-1',
     })
   })
@@ -576,24 +594,24 @@ describe('prepareTools', () => {
   test('handles toolChoice null (tool_choice is undefined)', () => {
     const result = prepareTools(
       [{ type: 'function' as const, name: 'test', parameters: {} }],
-      null as OpenAIToolChoice | null,
+      null as never,
     )
     expect(result.tool_choice).toBe(undefined)
   })
 
-  test('handles toolChoice type "auto" (maps to undefined)', () => {
+  test('handles toolChoice type "auto"', () => {
     const result = prepareTools([{ type: 'function' as const, name: 'test', parameters: {} }], { type: 'auto' })
-    expect(result.tool_choice).toBe(undefined)
+    expect(result.tool_choice).toBe('auto')
   })
 
-  test('handles toolChoice type "none" (maps to undefined)', () => {
+  test('handles toolChoice type "none"', () => {
     const result = prepareTools([{ type: 'function' as const, name: 'test', parameters: {} }], { type: 'none' })
-    expect(result.tool_choice).toBe(undefined)
+    expect(result.tool_choice).toBe('none')
   })
 
-  test('handles toolChoice type "required" (maps to undefined)', () => {
+  test('handles toolChoice type "required"', () => {
     const result = prepareTools([{ type: 'function' as const, name: 'test', parameters: {} }], { type: 'required' })
-    expect(result.tool_choice).toBe(undefined)
+    expect(result.tool_choice).toBe('required')
   })
 
   test('handles toolChoice type "tool" with toolName', () => {
@@ -684,6 +702,17 @@ describe('mapSaladCloudError', () => {
     expect(error.message).toBe('Model overload, please try again later.')
   })
 
+  test('parses problem+json title from gateway response body', async () => {
+    const body = { status: 503, title: 'Service Unavailable', type: 'about:blank' }
+    const response = await mockResponse(503, 'Service Unavailable', body, 'application/problem+json')
+    const error = await mapSaladCloudError(response)
+    expect(error.message).toBe('Service Unavailable')
+    expect(error.statusCode).toBe(503)
+    expect(error.isRetryable).toBe(true)
+    expect(error.responseBody).toBe(JSON.stringify(body))
+    expect(error.data).toEqual(body)
+  })
+
   test('falls back to default message when JSON has no error message', async () => {
     const response = await mockResponse(500, 'Internal Server Error', {
       error: { code: 'some_code' },
@@ -741,5 +770,295 @@ describe('SaladCloudChatLanguageModel', () => {
     expect(metadata.id).toBe('resp-123')
     expect(metadata.model).toBe('model-name')
     expect(metadata.createdAt).toBe(1234567890)
+  })
+
+  test('doGenerate surfaces mapped SaladCloud error response', async () => {
+    const body = { status: 503, title: 'Service Unavailable', type: 'about:blank' }
+    const fetch = async (): Promise<Response> =>
+      new Response(JSON.stringify(body), {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: { 'content-type': 'application/problem+json' },
+      })
+
+    const model = createSaladCloud({ apiKey: 'test-key', baseURL: 'https://example.test/v1', fetch })('qwen3.6-35b-a3b')
+
+    await expect(
+      model.doGenerate({
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'Say hello in one sentence.' }] }],
+      }),
+    ).rejects.toMatchObject({
+      message: 'Service Unavailable',
+      statusCode: 503,
+      isRetryable: true,
+      responseBody: JSON.stringify(body),
+    })
+  })
+
+  test('doGenerate sends clean OpenAI-compatible request body', async () => {
+    let capturedBody: Record<string, unknown> | undefined
+    const fetch = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      if (typeof init?.body === 'string') {
+        capturedBody = JSON.parse(init.body) as Record<string, unknown>
+      }
+
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl-test',
+          object: 'chat.completion',
+          created: 1735891200,
+          model: 'qwen3.6-35b-a3b',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+
+    const model = createSaladCloud({ apiKey: 'test-key', baseURL: 'https://example.test/v1', fetch })('qwen3.6-35b-a3b')
+
+    await model.doGenerate({
+      prompt: [{ role: 'user', content: [makeTextPart('What is the weather?')] }],
+      maxOutputTokens: 7,
+      topP: 0.5,
+      topK: 40,
+      frequencyPenalty: 0.1,
+      presencePenalty: 0.2,
+      stopSequences: ['END'],
+      seed: 123,
+      responseFormat: { type: 'json' },
+      reasoning: 'low',
+      tools: [
+        {
+          type: 'function',
+          name: 'get_weather',
+          description: 'Get weather',
+          inputSchema: {
+            type: 'object',
+            properties: { location: { type: 'string' } },
+            required: ['location'],
+          },
+        },
+      ],
+      toolChoice: { type: 'required' },
+    })
+
+    expect(capturedBody).toMatchObject({
+      model: 'qwen3.6-35b-a3b',
+      messages: [{ role: 'user', content: 'What is the weather?' }],
+      max_tokens: 7,
+      top_p: 0.5,
+      top_k: 40,
+      frequency_penalty: 0.1,
+      presence_penalty: 0.2,
+      stop: ['END'],
+      seed: 123,
+      response_format: { type: 'json_object' },
+      reasoning_effort: 'low',
+      tool_choice: 'required',
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'get_weather',
+            description: 'Get weather',
+            parameters: {
+              type: 'object',
+              properties: { location: { type: 'string' } },
+              required: ['location'],
+            },
+          },
+        },
+      ],
+    })
+    expect(capturedBody).not.toHaveProperty('topP')
+    expect(capturedBody).not.toHaveProperty('stopSequences')
+    expect(capturedBody).not.toHaveProperty('maxOutputTokens')
+  })
+
+  test('doGenerate returns SaladCloud reasoning content before text content', async () => {
+    const fetch = async (): Promise<Response> =>
+      new Response(
+        JSON.stringify({
+          id: 'chatcmpl-test',
+          object: 'chat.completion',
+          created: 1735891200,
+          model: 'qwen3.6-35b-a3b',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                reasoning_content: 'I should answer briefly.',
+                content: 'Hello.',
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 4, total_tokens: 5 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+
+    const model = createSaladCloud({ apiKey: 'test-key', baseURL: 'https://example.test/v1', fetch })('qwen3.6-35b-a3b')
+
+    const result = await model.doGenerate({
+      prompt: [{ role: 'user', content: [makeTextPart('Say hello.')] }],
+    })
+
+    expect(result.content).toEqual([
+      { type: 'reasoning', text: 'I should answer briefly.' },
+      { type: 'text', text: 'Hello.' },
+    ])
+  })
+
+  test('doStream emits reasoning parts from SaladCloud reasoning deltas', async () => {
+    const chunks = [
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1735891200,
+        model: 'qwen3.6-35b-a3b',
+        choices: [{ index: 0, delta: { reasoning_content: 'Thinking ' } }],
+      },
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1735891200,
+        model: 'qwen3.6-35b-a3b',
+        choices: [{ index: 0, delta: { reasoning_content: 'briefly.' } }],
+      },
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1735891200,
+        model: 'qwen3.6-35b-a3b',
+        choices: [{ index: 0, delta: { content: 'Hello.' } }],
+      },
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1735891200,
+        model: 'qwen3.6-35b-a3b',
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 5, total_tokens: 6 },
+      },
+    ]
+    const fetch = async (): Promise<Response> =>
+      new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(''), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+
+    const model = createSaladCloud({ apiKey: 'test-key', baseURL: 'https://example.test/v1', fetch })('qwen3.6-35b-a3b')
+    const result = await model.doStream({
+      prompt: [{ role: 'user', content: [makeTextPart('Say hello.')] }],
+    })
+
+    const parts: LanguageModelV4StreamPart[] = []
+    const reader = result.stream.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      parts.push(value)
+    }
+
+    expect(parts).toEqual([
+      { type: 'stream-start', warnings: [] },
+      { type: 'reasoning-start', id: 'reasoning-1' },
+      { type: 'reasoning-delta', id: 'reasoning-1', delta: 'Thinking ' },
+      { type: 'reasoning-delta', id: 'reasoning-1', delta: 'briefly.' },
+      { type: 'reasoning-end', id: 'reasoning-1' },
+      { type: 'text-start', id: '1' },
+      { type: 'text-delta', id: '1', delta: 'Hello.' },
+      { type: 'text-end', id: '1' },
+      {
+        type: 'finish',
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: convertUsage({ prompt_tokens: 1, completion_tokens: 5, total_tokens: 6 }),
+      },
+    ])
+  })
+
+  test('doStream accumulates streamed tool call input deltas', async () => {
+    const chunks = [
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1735891200,
+        model: 'qwen3.6-35b-a3b',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call-1',
+                  type: 'function',
+                  function: { name: 'get_weather', arguments: '{"location":"' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1735891200,
+        model: 'qwen3.6-35b-a3b',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [{ index: 0, function: { arguments: 'NYC"}' } }],
+            },
+          },
+        ],
+      },
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1735891200,
+        model: 'qwen3.6-35b-a3b',
+        choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      },
+    ]
+    const fetch = async (): Promise<Response> =>
+      new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(''), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+
+    const model = createSaladCloud({ apiKey: 'test-key', baseURL: 'https://example.test/v1', fetch })('qwen3.6-35b-a3b')
+    const result = await model.doStream({
+      prompt: [{ role: 'user', content: [makeTextPart('What is the weather?')] }],
+    })
+
+    const parts: LanguageModelV4StreamPart[] = []
+    const reader = result.stream.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      parts.push(value)
+    }
+
+    expect(parts).toContainEqual({ type: 'tool-input-start', id: 'call-1', toolName: 'get_weather' })
+    expect(parts).toContainEqual({ type: 'tool-input-delta', id: 'call-1', delta: '{"location":"' })
+    expect(parts).toContainEqual({ type: 'tool-input-delta', id: 'call-1', delta: 'NYC"}' })
+    expect(parts).toContainEqual({ type: 'tool-input-end', id: 'call-1' })
+    expect(parts).toContainEqual({
+      type: 'tool-call',
+      toolCallId: 'call-1',
+      toolName: 'get_weather',
+      input: '{"location":"NYC"}',
+    })
+    expect(parts).toContainEqual({
+      type: 'finish',
+      finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+      usage: convertUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }),
+    })
   })
 })

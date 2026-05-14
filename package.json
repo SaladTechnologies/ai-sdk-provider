@@ -1,5 +1,5 @@
 {
-  "name": "@saladtechnologies-oss/salad-cloud-ai-sdk",
+  "name": "@saladtechnologies-oss/ai-sdk-provider",
   "version": "0.1.0",
   "type": "module",
   "sideEffects": false,
@@ -28,14 +28,19 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/saladtechnologies-oss/salad-cloud-ai-sdk.git"
+    "url": "https://github.com/SaladTechnologies/ai-sdk-provider.git"
   },
   "bugs": {
-    "url": "https://github.com/saladtechnologies-oss/salad-cloud-ai-sdk/issues"
+    "url": "https://github.com/SaladTechnologies/ai-sdk-provider/issues"
   },
-  "homepage": "https://github.com/saladtechnologies-oss/salad-cloud-ai-sdk",
+  "homepage": "https://github.com/SaladTechnologies/ai-sdk-provider",
   "keywords": [
-    "ai"
+    "ai",
+    "ai-sdk",
+    "salad-cloud",
+    "saladcloud",
+    "vercel-ai-sdk",
+    "provider"
   ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts --splitting --clean --sourcemap",
@@ -52,10 +57,12 @@
     "zod": "^3.25.76 || ^4.1.8"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "@vitest/coverage-v8": "^3.0.0",
+    "ai": "^7.0.0-beta.116",
     "eslint": "^9.0.0",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-vitest": "^0.5.0",

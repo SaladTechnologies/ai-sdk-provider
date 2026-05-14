@@ -1,6 +1,8 @@
-import { withoutTrailingSlash } from '@ai-sdk/provider-utils'
+import { loadApiKey, loadOptionalSetting, withoutTrailingSlash } from '@ai-sdk/provider-utils'
 import { SaladCloudChatLanguageModel } from './salad-cloud-chat-language-model'
 import type { FetchFunction } from '@ai-sdk/provider-utils'
+
+const DEFAULT_BASE_URL = 'https://ai.salad.cloud/v1'
 
 /**
  * Settings for the SaladCloud provider.
@@ -65,22 +67,24 @@ function createChatModel(
   modelId: string,
   settings: SaladCloudChatSettings = {},
   options: {
-    baseURL: string
-    apiKey: string
+    baseURL?: string
+    apiKey?: string
     headers?: Record<string, string>
     generateId?: () => string
     fetch?: FetchFunction
   },
 ): SaladCloudChatLanguageModel {
-  const baseURL = withoutTrailingSlash(
-    options.baseURL ?? process.env.SALAD_CLOUD_BASE_URL ?? 'https://ai.salad.cloud/v1',
-  )
+  const baseURL = loadBaseURL(options.baseURL)
 
   return new SaladCloudChatLanguageModel(modelId, {
     provider: 'salad-cloud',
-    baseURL: baseURL ?? 'https://ai.salad.cloud/v1',
+    baseURL,
     headers: () => ({
-      Authorization: `Bearer ${options.apiKey}`,
+      Authorization: `Bearer ${loadApiKey({
+        apiKey: options.apiKey,
+        environmentVariableName: 'SALAD_CLOUD_API_KEY',
+        description: 'SaladCloud',
+      })}`,
       'Content-Type': 'application/json',
       ...options.headers,
     }),
@@ -97,7 +101,7 @@ function createChatModel(
  *
  * @example
  * ```ts
- * import { createSaladCloud } from '@saladtechnologies-oss/salad-cloud-ai-sdk';
+ * import { createSaladCloud } from '@saladtechnologies-oss/ai-sdk-provider';
  *
  * const saladCloud = createSaladCloud({
  *   apiKey: process.env.SALAD_CLOUD_API_KEY,
@@ -109,8 +113,8 @@ function createChatModel(
 function createSaladCloud(options: SaladCloudProviderSettings = {}): SaladCloudProvider {
   const createModel = (modelId: string, settings: SaladCloudChatSettings = {}): SaladCloudChatLanguageModel =>
     createChatModel(modelId, settings, {
-      baseURL: options.baseURL ?? process.env.SALAD_CLOUD_BASE_URL ?? 'https://ai.salad.cloud/v1',
-      apiKey: options.apiKey ?? process.env.SALAD_CLOUD_API_KEY ?? '',
+      baseURL: options.baseURL,
+      apiKey: options.apiKey,
       headers: options.headers ?? {},
       generateId: options.generateId,
       fetch: options.fetch,
@@ -129,6 +133,18 @@ function createSaladCloud(options: SaladCloudProviderSettings = {}): SaladCloudP
   provider.languageModel = createModel
 
   return provider
+}
+
+function loadBaseURL(baseURL?: string): string {
+  return (
+    withoutTrailingSlash(
+      baseURL ??
+        loadOptionalSetting({
+          settingValue: undefined,
+          environmentVariableName: 'SALAD_CLOUD_BASE_URL',
+        }),
+    ) ?? DEFAULT_BASE_URL
+  )
 }
 
 // Export default provider instance
