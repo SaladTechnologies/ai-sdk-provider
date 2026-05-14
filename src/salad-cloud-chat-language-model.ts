@@ -290,9 +290,11 @@ export class SaladCloudChatLanguageModel implements LanguageModelV4 {
         ? prepareTools(tools, options.toolChoice)
         : { tools: undefined, tool_choice: undefined, warnings: [] }
 
+    const messages = convertToProviderMessages(options.prompt)
+
     const body = removeUndefinedEntries({
       model: this.modelId,
-      messages: convertToProviderMessages(options.prompt),
+      messages,
       max_tokens: options.maxOutputTokens,
       temperature: options.temperature,
       top_p: options.topP,
@@ -305,6 +307,7 @@ export class SaladCloudChatLanguageModel implements LanguageModelV4 {
       tool_choice: preparedTools?.tool_choice,
       response_format: mapResponseFormat(options.responseFormat),
       reasoning_effort: providerOptions.reasoningEffort ?? mapReasoning(options.reasoning, warnings),
+      chat_template_kwargs: options.reasoning === 'none' ? { enable_thinking: false } : undefined,
     })
 
     return { args: body, warnings: [...warnings, ...(preparedTools.warnings ?? [])] }

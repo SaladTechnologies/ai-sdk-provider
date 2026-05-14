@@ -68,6 +68,8 @@ Current SaladCloud AI Gateway models:
 
 Use `providerOptions.salad-cloud` for SaladCloud-specific options.
 
+For Qwen reasoning models, `reasoning: 'none'` sends `chat_template_kwargs: { enable_thinking: false }` to disable thinking. Omitting `reasoning`, or using `low`, `medium`, or `high`, leaves SaladCloud/vLLM thinking behavior enabled by default.
+
 ```ts
 const result = await generateText({
   model: saladCloud('qwen3.6-35b-a3b'),

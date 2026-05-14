@@ -876,6 +876,72 @@ describe('SaladCloudChatLanguageModel', () => {
     expect(capturedBody).not.toHaveProperty('maxOutputTokens')
   })
 
+  test('doGenerate disables Qwen thinking when reasoning is none', async () => {
+    let capturedBody: Record<string, unknown> | undefined
+    const fetch = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      if (typeof init?.body === 'string') {
+        capturedBody = JSON.parse(init.body) as Record<string, unknown>
+      }
+
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl-test',
+          object: 'chat.completion',
+          created: 1735891200,
+          model: 'qwen3.6-35b-a3b',
+          choices: [{ index: 0, message: { role: 'assistant', content: '444' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+
+    const model = createSaladCloud({ apiKey: 'test-key', baseURL: 'https://example.test/v1', fetch })('qwen3.6-35b-a3b')
+
+    await model.doGenerate({
+      prompt: [{ role: 'user', content: [makeTextPart('What is 12 * 37?')] }],
+      reasoning: 'none',
+    })
+
+    expect(capturedBody).toMatchObject({
+      chat_template_kwargs: { enable_thinking: false },
+    })
+    expect(capturedBody).not.toHaveProperty('reasoning_effort')
+  })
+
+  test('doGenerate keeps SaladCloud thinking at provider default unless reasoning is none', async () => {
+    let capturedBody: Record<string, unknown> | undefined
+    const fetch = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      if (typeof init?.body === 'string') {
+        capturedBody = JSON.parse(init.body) as Record<string, unknown>
+      }
+
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl-test',
+          object: 'chat.completion',
+          created: 1735891200,
+          model: 'qwen3.6-35b-a3b',
+          choices: [{ index: 0, message: { role: 'assistant', content: '444' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+
+    const model = createSaladCloud({ apiKey: 'test-key', baseURL: 'https://example.test/v1', fetch })('qwen3.6-35b-a3b')
+
+    await model.doGenerate({
+      prompt: [{ role: 'user', content: [makeTextPart('What is 12 * 37?')] }],
+      reasoning: 'medium',
+    })
+
+    expect(capturedBody).toMatchObject({
+      reasoning_effort: 'medium',
+    })
+    expect(capturedBody).not.toHaveProperty('chat_template_kwargs')
+  })
+
   test('doGenerate returns SaladCloud reasoning content before text content', async () => {
     const fetch = async (): Promise<Response> =>
       new Response(
