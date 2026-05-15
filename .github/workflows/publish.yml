@@ -1,28 +1,36 @@
-name: Publish
+name: Publish Package
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  publish:
+  test:
+    name: Test Package
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
           registry-url: 'https://registry.npmjs.org'
+          scope: '@saladtechnologies-oss'
+          always-auth: 'true'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: npm ci
 
-      - name: Type check
+      - name: Type Check
         run: npm run type-check
 
       - name: Lint
@@ -34,7 +42,49 @@ jobs:
       - name: Build
         run: npm run build
 
+  publish:
+    name: Publish Package
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+          registry-url: 'https://registry.npmjs.org'
+          scope: '@saladtechnologies-oss'
+          always-auth: 'true'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Check Published Version
+        id: package
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          echo "name=${PACKAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish
-        run: npm publish --provenance
+        if: steps.package.outputs.exists == 'false'
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Skip Existing Version
+        if: steps.package.outputs.exists == 'true'
+        run: echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} is already published."

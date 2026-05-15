@@ -4,17 +4,20 @@
   "type": "module",
   "sideEffects": false,
   "license": "Apache-2.0",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
   "files": [
+    "NOTICE",
     "dist",
     "src",
     "!src/**/*.test.ts"
@@ -23,17 +26,16 @@
     "node": ">=18"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/SaladTechnologies/ai-sdk-provider.git"
+    "url": "git+https://github.com/saladtechnologies/ai-sdk-provider.git"
   },
   "bugs": {
-    "url": "https://github.com/SaladTechnologies/ai-sdk-provider/issues"
+    "url": "https://github.com/saladtechnologies/ai-sdk-provider/issues"
   },
-  "homepage": "https://github.com/SaladTechnologies/ai-sdk-provider",
+  "homepage": "https://github.com/saladtechnologies/ai-sdk-provider",
   "keywords": [
     "ai",
     "ai-sdk",
