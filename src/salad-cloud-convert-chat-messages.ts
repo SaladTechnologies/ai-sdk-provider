@@ -161,11 +161,18 @@ function convertToolResultContentPart(part: ToolResultContentPart): string {
   switch (part.type) {
     case 'text':
       return part.text
-    case 'file-data':
-      return `data:${part.mediaType};base64,${part.data}`
-    case 'file-url':
-      return part.url
-    case 'file-reference':
+    case 'file':
+      switch (part.data.type) {
+        case 'data':
+          return `data:${part.mediaType};base64,${convertFileDataToBase64(part.data.data)}`
+        case 'url':
+          return part.data.url.toString()
+        case 'text':
+          return part.data.text
+        case 'reference':
+          return ''
+      }
+      return ''
     case 'custom':
       return ''
   }
