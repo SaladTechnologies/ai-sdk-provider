@@ -450,6 +450,50 @@ describe('convertToProviderMessages', () => {
     })
   })
 
+  test('converts tool result with stable V4 file content', () => {
+    const toolResultPart: LanguageModelV4ToolResultPart = {
+      type: 'tool-result',
+      toolCallId: 'call-1',
+      toolName: 'read_files',
+      output: {
+        type: 'content',
+        value: [
+          { type: 'text', text: 'Attachments: ' },
+          {
+            type: 'file',
+            mediaType: 'image/png',
+            data: { type: 'data', data: new Uint8Array([1, 2, 3]) },
+          },
+          {
+            type: 'file',
+            mediaType: 'text/plain',
+            data: { type: 'url', url: new URL('https://example.com/file.txt') },
+          },
+          {
+            type: 'file',
+            mediaType: 'text/plain',
+            data: { type: 'text', text: 'inline text' },
+          },
+          {
+            type: 'file',
+            mediaType: 'application/octet-stream',
+            data: { type: 'reference', reference: { salad: 'file-1' } },
+          },
+          { type: 'custom' },
+        ],
+      },
+    }
+    const prompt: LanguageModelV4Prompt = [{ role: 'tool', content: [toolResultPart] }]
+    const result = convertToProviderMessages(prompt)
+    expect(result).toEqual([
+      {
+        role: 'tool',
+        content: 'Attachments: data:image/png;base64,AQIDhttps://example.com/file.txtinline text',
+        tool_call_id: 'call-1',
+      },
+    ])
+  })
+
   test('converts multi-turn conversation', () => {
     const prompt: LanguageModelV4Prompt = [
       { role: 'system', content: 'Be helpful.' },

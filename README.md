@@ -3,7 +3,7 @@
 Vercel AI SDK provider for the SaladCloud AI Gateway.
 
 ```bash
-npm install @saladtechnologies-oss/ai-sdk-provider ai@beta zod
+npm install @saladtechnologies-oss/ai-sdk-provider ai zod
 ```
 
 ## Setup
